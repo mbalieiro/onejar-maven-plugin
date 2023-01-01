@@ -169,9 +169,6 @@ public class OneJarMojo extends AbstractMojo {
 
 	public void execute() throws MojoExecutionException {
 
-		// Show some info about the plugin.
-		displayPluginInfo();
-
 		JarOutputStream out = null;
 		JarInputStream template = null;
 
@@ -246,15 +243,6 @@ public class OneJarMojo extends AbstractMojo {
 		if (attachToBuild) {
 			projectHelper.attachArtifact(project, "jar", classifier, onejarFile);
 		}
-	}
-
-	private void displayPluginInfo() {
-		getLog().info("Using One-Jar to create a single-file distribution");
-		getLog().info("Implementation Version: " + implementationVersion);
-		getLog().info("Using One-Jar version: " + onejarVersion);
-		getLog().info("More info on One-Jar: http://one-jar.sourceforge.net/");
-		getLog().info("License for One-Jar:  http://one-jar.sourceforge.net/one-jar-license.txt");
-		getLog().info("One-Jar file: " + outputDirectory.getAbsolutePath() + File.separator + filename);
 	}
 
 	// ----- One-Jar Template
