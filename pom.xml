@@ -62,6 +62,14 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 	</properties>
+	
+	<distributionManagement>
+		<repository>
+			<id>bbts</id>
+			<name>Archiva-BBTS</name>
+			<url>http://10.8.1.202:9080/archiva/repository/internal</url>
+		</repository>
+	</distributionManagement>
 
 	<scm>
 		<connection>scm:git:git@github.com:mbalieiro/onejar-maven-plugin.git</connection>
