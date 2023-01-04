@@ -6,13 +6,10 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.URISyntaxException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
@@ -30,6 +27,8 @@ import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.MavenProjectHelper;
 import org.codehaus.plexus.util.FileUtils;
+
+import br.bbts.segu.HashingUtil;
 
 /**
  * Creates an executable one-jar version of the project's normal jar, including
@@ -61,14 +60,6 @@ public class OneJarMojo extends AbstractMojo {
 	 */
 	private Collection<Dependency> dependencies;
 	
-	/**
-	 * Custom Manifest Entries.
-	 *
-	 * @parameter
-	 * @readonly
-	 */
-	private Map<String, String> manifestEntries = new HashMap<String, String>();
-
 	/**
 	 * FileSet to be included in the "binlib" directory inside the one-jar. This is
 	 * the place to include native libraries such as .dll files and .so files. They
@@ -142,7 +133,21 @@ public class OneJarMojo extends AbstractMojo {
 	 * @parameter default-value=true
 	 */
 	private boolean includeSystem;
-
+	
+	/**
+	 * Whether to include native libs
+	 *
+	 * @parameter default-value=false
+	 */
+	private boolean includeNative;
+	
+	/**
+	 * Whether to generate md5 hash for libs content folder, for validate update requirement
+	 *
+	 * @parameter default-value=false
+	 */
+	private boolean generateLibsHash;
+	
 	/**
 	 * This Maven project.
 	 *
@@ -166,25 +171,39 @@ public class OneJarMojo extends AbstractMojo {
 	 * @parameter expression="${onejar-mainclass}"
 	 */
 	private String mainClass;
-
+	
 	public void execute() throws MojoExecutionException {
 
 		JarOutputStream out = null;
 		JarInputStream template = null;
-
-		File onejarFile;
+		
+		boolean deleteMainJarTmp = false;
+		
+		File oneJarFile;
+		File mainJarFile;
 		try {
-			// Create the target file
-			onejarFile = new File(outputDirectory, filename);
-
+			
+			// Create the target files
+			oneJarFile = new File(outputDirectory, filename);
+			mainJarFile = new File(outputDirectory, mainJarFilename);
+			
+			if (filename.equals(mainJarFilename)) {
+				// Create the target file
+				File original = new File(outputDirectory, mainJarFilename);
+				mainJarFile = new File(outputDirectory, mainJarFilename + ".tmp");
+				
+				FileUtils.copyFile(original, mainJarFile);
+				deleteMainJarTmp = true;
+			}
+			
 			// Open a stream to write to the target file
-			out = new JarOutputStream(new FileOutputStream(onejarFile, false), getManifest());
-
+			out = new JarOutputStream(new FileOutputStream(oneJarFile, false), getManifest());
+			
 			// Main jar
 			if (getLog().isDebugEnabled()) {
 				getLog().debug("Adding main jar main/[" + mainJarFilename + "]");
 			}
-			addToZip(new File(outputDirectory, mainJarFilename), "main/", out);
+			addToZip(mainJarFile, "main/", mainJarFilename, out);
 
 			// All dependencies, including transient dependencies, but excluding system
 			// scope dependencies
@@ -208,14 +227,15 @@ public class OneJarMojo extends AbstractMojo {
 			}
 
 			// Native libraries
-			if (binlibs != null) {
+			if (includeNative && binlibs != null) {
 				for (FileSet eachFileSet : binlibs) {
 					List<File> includedFiles = toFileList(eachFileSet);
 					if (getLog().isDebugEnabled()) {
 						getLog().debug("Adding [" + includedFiles.size() + "] native libraries...");
 					}
 					for (File eachIncludedFile : includedFiles) {
-						addToZip(eachIncludedFile, "binlib/", out);
+						String relativePath = eachIncludedFile.getAbsolutePath().replace(Paths.get(eachFileSet.getDirectory()).toString(), "");
+						addToZip(eachIncludedFile, "binlib", relativePath.replaceAll("\\\\", "/"), out);
 					}
 				}
 			}
@@ -231,6 +251,9 @@ public class OneJarMojo extends AbstractMojo {
 				}
 			}
 
+			if (deleteMainJarTmp) {
+				FileUtils.forceDelete(mainJarFile);
+			}
 		} catch (IOException e) {
 			getLog().error(e);
 			throw new MojoExecutionException("One-jar Mojo failed.", e);
@@ -241,7 +264,7 @@ public class OneJarMojo extends AbstractMojo {
 
 		// Attach the created one-jar to the build.
 		if (attachToBuild) {
-			projectHelper.attachArtifact(project, "jar", classifier, onejarFile);
+			projectHelper.attachArtifact(project, "jar", classifier, oneJarFile);
 		}
 	}
 
@@ -268,16 +291,26 @@ public class OneJarMojo extends AbstractMojo {
 			manifest.getMainAttributes().putValue("One-Jar-Main-Class", mainClass);
 		}
 		
-		for (String key : manifestEntries.keySet()) {
-			String value = manifestEntries.get(key);
-			try {
-				value = new URI(null, null, value, null).toASCIIString();
-			} catch (URISyntaxException e) {
-				e.printStackTrace();
+		if (!includeSystem) {
+			StringBuilder classPath = new StringBuilder();
+			for (File dependency : extractSystemDependencyFiles(dependencies)) {
+				classPath.append("file:///" + dependency.getAbsolutePath().replaceAll(" ", "%20") + " ");
 			}
-			manifest.getMainAttributes().putValue(key, value);
+			
+			manifest.getMainAttributes().putValue("Class-Path", classPath.toString());
 		}
-
+		
+		if (generateLibsHash && binlibs != null) {
+			for (FileSet eachFileSet : binlibs) {
+				List<File> includedFiles = toFileList(eachFileSet);
+				if (getLog().isDebugEnabled()) {
+					getLog().debug("Calculating hash [" + includedFiles.size() + "] native libraries...");
+				}
+				String hash = HashingUtil.hashFiles(includedFiles, true);
+				manifest.getMainAttributes().putValue("Native-Libs-Hash", hash);
+			}
+		}
+		
 		// If the client has specified an implementationVersion argument, add it also
 		// (It's required and defaulted, so this always executes...)
 		//
@@ -297,6 +330,10 @@ public class OneJarMojo extends AbstractMojo {
 
 	// ----- Zip-file manipulations
 	// ------------------------------------------------------------------------------------
+	
+	private void addToZip(File sourceFile, String zipfilePath, String relativePath, JarOutputStream out) throws IOException {
+		addToZip(out, new ZipEntry(zipfilePath + relativePath), new FileInputStream(sourceFile));
+	}
 
 	private void addToZip(File sourceFile, String zipfilePath, JarOutputStream out) throws IOException {
 		addToZip(out, new ZipEntry(zipfilePath + sourceFile.getName()), new FileInputStream(sourceFile));
@@ -351,7 +388,6 @@ public class OneJarMojo extends AbstractMojo {
 			if (file.isFile()) {
 				files.add(file);
 			}
-
 		}
 		return files;
 	}
@@ -359,25 +395,25 @@ public class OneJarMojo extends AbstractMojo {
 	/**
 	 * Returns a {@link File} object for each system dependency.
 	 * 
-	 * @param systemDependencies a collection of dependencies
+	 * @param dependencies a collection of dependencies
 	 * @return <code>File</code> objects for each system dependency in the supplied
 	 *         dependencies.
 	 */
-	private List<File> extractSystemDependencyFiles(Collection<Dependency> systemDependencies) {
+	private List<File> extractSystemDependencyFiles(Collection<Dependency> dependencies) {
 		final ArrayList<File> files = new ArrayList<File>();
 
-		if (systemDependencies == null) {
+		if (dependencies == null) {
 			return files;
 		}
 
-		for (Dependency systemDependency : systemDependencies) {
+		for (Dependency systemDependency : dependencies) {
 			if (systemDependency != null && "system".equals(systemDependency.getScope())) {
 				files.add(new File(systemDependency.getSystemPath()));
 			}
 		}
 		return files;
 	}
-
+	
 	@SuppressWarnings("unchecked")
 	private static List<File> toFileList(FileSet fileSet) throws IOException {
 		File directory = new File(fileSet.getDirectory());
