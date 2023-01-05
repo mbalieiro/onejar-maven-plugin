@@ -68,6 +68,13 @@ public class OneJarMojo extends AbstractMojo {
 	 * @parameter
 	 */
 	private FileSet[] binlibs;
+	
+	/**
+	 * FileSet to be included in the "other" directory inside the one-jar.
+	 * 
+	 * @parameter
+	 */
+	private FileSet[] other;
 
 	/**
 	 * The directory for the resulting file.
@@ -177,8 +184,6 @@ public class OneJarMojo extends AbstractMojo {
 		JarOutputStream out = null;
 		JarInputStream template = null;
 		
-		boolean deleteMainJarTmp = false;
-		
 		File oneJarFile;
 		File mainJarFile;
 		try {
@@ -190,10 +195,10 @@ public class OneJarMojo extends AbstractMojo {
 			if (filename.equals(mainJarFilename)) {
 				// Create the target file
 				File original = new File(outputDirectory, mainJarFilename);
-				mainJarFile = new File(outputDirectory, mainJarFilename + ".tmp");
+				mainJarFile = File.createTempFile(mainJarFilename, null);
+				mainJarFile.deleteOnExit();
 				
 				FileUtils.copyFile(original, mainJarFile);
-				deleteMainJarTmp = true;
 			}
 			
 			// Open a stream to write to the target file
@@ -225,6 +230,20 @@ public class OneJarMojo extends AbstractMojo {
 					addToZip(jar, "lib/", out);
 				}
 			}
+			
+			// Other files
+			if (other != null) {
+				for (FileSet eachFileSet : other) {
+					List<File> includedFiles = toFileList(eachFileSet);
+					if (getLog().isDebugEnabled()) {
+						getLog().debug("Adding [" + includedFiles.size() + "] other files...");
+					}
+					for (File eachIncludedFile : includedFiles) {
+						String relativePath = eachIncludedFile.getAbsolutePath().replace(Paths.get(eachFileSet.getDirectory()).toString(), "");
+						addToZip(eachIncludedFile, "other", relativePath.replaceAll("\\\\", "/"), out);
+					}
+				}
+			}
 
 			// Native libraries
 			if (includeNative && binlibs != null) {
@@ -239,7 +258,7 @@ public class OneJarMojo extends AbstractMojo {
 					}
 				}
 			}
-
+			
 			// One-jar stuff
 			getLog().debug("Adding one-jar components...");
 			template = openOnejarTemplateArchive();
@@ -249,10 +268,6 @@ public class OneJarMojo extends AbstractMojo {
 				if (!"boot-manifest.mf".equals(entry.getName())) {
 					addToZip(out, entry, template);
 				}
-			}
-
-			if (deleteMainJarTmp) {
-				FileUtils.forceDelete(mainJarFile);
 			}
 		} catch (IOException e) {
 			getLog().error(e);
