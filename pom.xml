@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>br.bbts.psim</groupId>
 	<artifactId>onejar-maven-plugin</artifactId>
-	<version>1.4.9</version>
+	<version>1.4.10</version>
 	<packaging>maven-plugin</packaging>
 	<name>One-Jar Maven Plugin</name>
 	<url>http://onejar-maven-plugin.googlecode.com/</url>

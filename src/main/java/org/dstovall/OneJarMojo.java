@@ -133,6 +133,13 @@ public class OneJarMojo extends AbstractMojo {
 	 * @parameter default-value="onejar"
 	 */
 	private String classifier;
+	
+	/**
+	 * Whether to mark optional dependencies in the manifest
+	 *
+	 * @parameter default-value=false
+	 */
+	private boolean markOptional;
 
 	/**
 	 * Whether to include system dependencies
@@ -300,8 +307,7 @@ public class OneJarMojo extends AbstractMojo {
 		Manifest manifest = new Manifest(getFileBytes(zipIS, "boot-manifest.mf"));
 		IOUtils.closeQuietly(zipIS);
 
-		// If the client has specified a mainClass argument, add the proper entry to the
-		// manifest
+		// If the client has specified a mainClass argument, add the proper entry to the manifest
 		if (mainClass != null) {
 			manifest.getMainAttributes().putValue("One-Jar-Main-Class", mainClass);
 		}
@@ -312,7 +318,22 @@ public class OneJarMojo extends AbstractMojo {
 				classPath.append("file:///" + dependency.getAbsolutePath().replaceAll(" ", "%20") + " ");
 			}
 			
-			manifest.getMainAttributes().putValue("Class-Path", classPath.toString());
+			if (classPath.length() > 0) {
+				manifest.getMainAttributes().putValue("Class-Path", classPath.toString());
+			}
+		}
+		
+		if (markOptional) {
+			StringBuilder optional = new StringBuilder();
+			for (Dependency dependency : dependencies) {
+				if (dependency.isOptional()) {
+					optional.append(dependency.getArtifactId() + "-" + dependency.getVersion() + ".jar ");
+				}
+			}
+			
+			if (optional.length() > 0) {
+				manifest.getMainAttributes().putValue("Optional-Libs", optional.toString());
+			}
 		}
 		
 		if (generateLibsHash && binlibs != null) {
